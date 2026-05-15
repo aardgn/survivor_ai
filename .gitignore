@@ -216,3 +216,13 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+.env
+.envrc
+# 2. Vektör Veritabanı (ChromaDB)
+# Bu klasör binlerce küçük dosya içerir, repoyu çok ağırlaştırır.
+chroma_db/
+*.db
+*.sqlite3
+
+# 3. VS Code Ayarları
+.vscode/
