@@ -1,0 +1,167 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+<meta charset="UTF-8">
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Share+Tech+Mono&display=swap');
+  body { background: #050a0f; color: #b0c8d4; font-family: 'Share Tech Mono', monospace; display: grid; grid-template-columns: 1fr 350px; height: 100vh; margin: 0; overflow: hidden; }
+  #canvasWrap { position: relative; border-right: 1px solid #0d2a3a; background: radial-gradient(ellipse at center, #0a1520 0%, #050a0f 100%); }
+  canvas { width: 100%; height: 100%; cursor: crosshair; }
+  .top-bar { position: absolute; top: 15px; left: 15px; background: rgba(5,10,15,0.85); padding: 10px 20px; border: 1px solid #0d2a3a; border-radius: 5px; display: flex; gap: 15px; align-items: center; z-index: 10; }
+  .stat { font-size: 14px; } .stat span { color: #39ff14; font-weight: bold; }
+  button { font-family: inherit; background: transparent; color: #00e5ff; border: 1px solid #00e5ff; padding: 6px 12px; cursor: pointer; border-radius: 3px; }
+  button:hover, button.running { background: #00e5ff; color: #000; }
+  aside { background: #050a0f; padding: 15px; display: flex; flex-direction: column; gap: 15px; height: 100vh; box-sizing: border-box; }
+  .panel { background: #0a1520; border: 1px solid #0d2a3a; padding: 15px; border-radius: 5px; display: flex; flex-direction: column; overflow: hidden; }
+  h3 { margin: 0 0 10px 0; font-size: 14px; letter-spacing: 1px; border-bottom: 1px solid #0d2a3a; padding-bottom: 5px; }
+  #detailBox { flex: 0.35; font-size: 13px; line-height: 1.5; color: #e8f4f8; overflow-y: auto;}
+  .thought { color: #ffb830; font-style: italic; }
+  #logBox { flex: 0.65; overflow-y: auto; font-size: 12px; }
+  .log-item { padding: 4px 0; border-bottom: 1px solid rgba(255,255,255,0.05); }
+  ::-webkit-scrollbar { width: 4px; }
+  ::-webkit-scrollbar-thumb { background: #0d2a3a; }
+</style>
+</head>
+<body>
+<div id="canvasWrap">
+  <div class="top-bar">
+    <div class="stat">TUR: <span id="tur">0</span></div>
+    <div class="stat">NÜFUS: <span id="nufus">0</span></div>
+    <button id="btnToggle" onclick="toggle()">▶ BAŞLAT</button>
+    <button onclick="fetch('/rizik',{method:'POST'})">☀ RIZIK</button>
+    <button onclick="fetch('/felaket',{method:'POST'})">🌋 KURAKLIK</button>
+  </div>
+  <canvas id="c"></canvas>
+</div>
+<aside>
+  <div class="panel" style="flex: 0.35;">
+    <h3 style="color:#ffb830;">🔍 AJAN BEYNİ (TIKLA)</h3>
+    <div id="detailBox">
+      <div style="color:#888; text-align:center; margin-top:20px;">
+        Haritadan bir ajanın üzerine tıklayarak düşüncelerini okuyun.
+      </div>
+    </div>
+  </div>
+  <div class="panel" style="flex: 0.65;">
+    <h3 style="color:#00e5ff;">📡 OLAY GÜNLÜĞÜ</h3>
+    <div id="logBox"></div>
+  </div>
+</aside>
+<script>
+const canvas = document.getElementById('c'); const ctx = canvas.getContext('2d');
+const wrap = document.getElementById('canvasWrap');
+let state = { ajanlar: [], kaynaklar: [], bloklar: [], olaylar: [] };
+let selectedAgentId = null;
+
+function resize() { canvas.width = wrap.clientWidth; canvas.height = wrap.clientHeight; }
+window.addEventListener('resize', resize); resize();
+
+canvas.addEventListener('mousedown', (e) => {
+    const rect = canvas.getBoundingClientRect();
+    const x = (e.clientX - rect.left) * (800 / canvas.width);
+    const y = (e.clientY - rect.top) * (600 / canvas.height);
+    selectedAgentId = null;
+    let minDist = 30; 
+    if(state.ajanlar) {
+        state.ajanlar.forEach(a => {
+            const dist = Math.hypot(a.x - x, a.y - y);
+            if(dist < minDist) { minDist = dist; selectedAgentId = a.id; }
+        });
+    }
+    updateDetail();
+});
+
+function draw() {
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    const mx = x => (x / 800) * canvas.width; const my = y => (y / 600) * canvas.height;
+
+    ctx.strokeStyle = 'rgba(0,229,255,0.03)'; ctx.lineWidth = 1;
+    for(let x=0; x<800; x+=60) { ctx.beginPath(); ctx.moveTo(mx(x),0); ctx.lineTo(mx(x),canvas.height); ctx.stroke(); }
+    for(let y=0; y<600; y+=60) { ctx.beginPath(); ctx.moveTo(0,my(y)); ctx.lineTo(canvas.width,my(y)); ctx.stroke(); }
+
+    state.bloklar.forEach(b => {
+        const bx = mx(b.x), by = my(b.y), size = mx(40);
+        ctx.strokeStyle = '#ffb830'; ctx.lineWidth = 2;
+        ctx.fillStyle = 'rgba(255, 184, 48, 0.05)'; 
+        ctx.strokeRect(bx - size/2, by - size/2, size, size);
+        ctx.fillRect(bx - size/2, by - size/2, size, size);
+        ctx.fillStyle = '#ffb830'; ctx.font = '12px monospace'; ctx.textAlign='center'; ctx.textBaseline='middle';
+        ctx.fillText(b.id, bx, by);
+    });
+
+    state.kaynaklar.forEach(k => {
+        ctx.fillStyle = '#39ff14'; ctx.shadowBlur = 10; ctx.shadowColor = '#39ff14';
+        ctx.beginPath(); ctx.arc(mx(k.x), my(k.y), 4, 0, Math.PI*2); ctx.fill();
+        ctx.shadowBlur = 0;
+    });
+
+    state.ajanlar.forEach(a => {
+        const bx = mx(a.x), by = my(a.y);
+        
+        if(a.grup_uyeleri && a.grup_uyeleri.length > 0) {
+            ctx.strokeStyle = 'rgba(255, 0, 255, 0.5)'; ctx.lineWidth = 2;
+            ctx.beginPath(); ctx.arc(bx, by, 18, 0, Math.PI*2); ctx.stroke();
+        }
+
+        if(a.id === selectedAgentId) {
+            ctx.strokeStyle = '#fff'; ctx.lineWidth = 2;
+            ctx.beginPath(); ctx.arc(bx, by, 22, 0, Math.PI*2); ctx.stroke();
+        }
+
+        ctx.fillStyle = '#00e5ff'; ctx.beginPath(); ctx.arc(bx, by, 12, 0, Math.PI*2); ctx.fill();
+        ctx.fillStyle = '#000'; ctx.font = '12px serif'; ctx.textAlign='center'; ctx.textBaseline='middle';
+        ctx.fillText(a.emoji, bx, by);
+        ctx.fillStyle = '#fff'; ctx.font = '10px monospace';
+        ctx.fillText(a.isim, bx, by + 22);
+    });
+}
+
+function updateDetail() {
+    const box = document.getElementById('detailBox');
+    if (!selectedAgentId) { 
+        box.innerHTML = `<div style="color:#888; text-align:center; margin-top:20px;">Haritadan bir ajanın üzerine tıklayarak düşüncelerini okuyun.</div>`; 
+        return; 
+    }
+    
+    const aj = state.ajanlar.find(a => a.id === selectedAgentId);
+    if(!aj) return;
+
+    let grupHTML = aj.grup_uyeleri && aj.grup_uyeleri.length > 0 ? `<br><b style="color:#ff00ff">🛡️ İttifak:</b> ${aj.grup_uyeleri.join(', ')}<br>` : '';
+
+    box.innerHTML = `
+        <b style="font-size:16px; color:#00e5ff;">${aj.emoji} ${aj.isim}</b> (Nesil ${aj.nesil})<br>
+        <span style="color:#888">${aj.kisilik}</span><hr style="border-color:#0d2a3a;">
+        <b>⚡ Enerji:</b> <span class="highlight">${aj.enerji}</span>/200<br>
+        <b>Eylem:</b> ${aj.eylem}<br>
+        ${grupHTML}<br>
+        <b style="color:#ffb830;">🧠 DÜŞÜNCE:</b><br>
+        <span class="thought">"${aj.dusunce}"</span>
+    `;
+}
+
+async function fetchState() {
+  try {
+      const res = await fetch('/state'); state = await res.json();
+      
+      document.getElementById('tur').innerText = state.tur;
+      document.getElementById('nufus').innerText = state.ajanlar ? state.ajanlar.length : 0;
+      
+      const btn = document.getElementById('btnToggle');
+      btn.className = state.calisiyor ? "running" : "";
+      btn.innerText = state.calisiyor ? "⏸ DURAKLAT" : "▶ BAŞLAT";
+
+      const logBox = document.getElementById('logBox');
+      if(state.olaylar) {
+          logBox.innerHTML = state.olaylar.map(o => `<div class="log-item">${o}</div>`).join('');
+      }
+
+      draw();
+      if(selectedAgentId) updateDetail();
+  } catch(e) {}
+}
+
+function toggle() { fetch('/toggle', {method:'POST'}); }
+setInterval(fetchState, 500); fetchState();
+</script>
+</body>
+</html>
